@@ -12,23 +12,29 @@ public class PlayerController : MonoBehaviour
 
     Rigidbody rb;
     Transform mainCam;
-    bool isGrounded, jumpQueued;
+    
+    bool isGrounded, jumpQueued, isJumpHolding;
     Vector3 groundNormal = Vector3.up;
+    float lastJumpTime = -10f;
 
     void Awake()
     {
         rb = GetComponent<Rigidbody>();
         rb.freezeRotation = true;
         rb.interpolation = RigidbodyInterpolation.Interpolate;
-        
-        // Cache the main camera to use its rotation for movement
         mainCam = Camera.main.transform; 
     }
 
     void Update()
     {
-        if (isGrounded && Input.GetKeyDown(KeyCode.Space))
+        // 1. Read holding inputs in Update for frame-perfect accuracy
+        isJumpHolding = Input.GetKey(KeyCode.Space);
+        
+        // 2. Add a tiny cooldown so we don't double-queue jumps
+        if (isGrounded && Input.GetKeyDown(KeyCode.Space) && Time.time > lastJumpTime + 0.2f)
+        {
             jumpQueued = true;
+        }
     }
 
     void FixedUpdate()
@@ -36,25 +42,22 @@ public class PlayerController : MonoBehaviour
         float h = Input.GetAxis("Horizontal");
         float v = Input.GetAxis("Vertical");
 
-        // --- CAMERA-RELATIVE MOVEMENT MATH ---
-        // 1. Get the camera's forward and right directional vectors
         Vector3 camForward = mainCam.forward;
         Vector3 camRight = mainCam.right;
-
-        // 2. Flatten the vectors on the Y axis so looking down doesn't push the player into the floor
         camForward.y = 0f;
         camRight.y = 0f;
         camForward.Normalize();
         camRight.Normalize();
 
-        // 3. Multiply inputs by the camera's directions instead of global world axes
         Vector3 move = (camForward * v) + (camRight * h);
         move = Vector3.ClampMagnitude(move, 1f) * speed;
-
-        // Slope movement calculation
         Vector3 slopeMove = Vector3.ProjectOnPlane(move, groundNormal).normalized * move.magnitude;
 
-        if (isGrounded && !jumpQueued)
+        // 3. Check if we JUST jumped in the last 0.1 seconds
+        bool recentlyJumped = Time.time < lastJumpTime + 0.1f;
+
+        // 4. Only snap to the ground if we didn't just launch into the air
+        if (isGrounded && !jumpQueued && !recentlyJumped)
         {
             rb.useGravity = false;
             rb.linearVelocity = slopeMove;
@@ -68,7 +71,8 @@ public class PlayerController : MonoBehaviour
             {
                 rb.linearVelocity += Vector3.up * Physics.gravity.y * (fallMultiplier - 1) * Time.fixedDeltaTime;
             }
-            else if (rb.linearVelocity.y > 0 && !Input.GetKey(KeyCode.Space))
+            // 5. Use the safe 'isJumpHolding' bool from Update() to check for short hops
+            else if (rb.linearVelocity.y > 0 && !isJumpHolding)
             {
                 rb.linearVelocity += Vector3.up * Physics.gravity.y * (lowJumpMultiplier - 1) * Time.fixedDeltaTime;
             }
@@ -78,6 +82,7 @@ public class PlayerController : MonoBehaviour
         {
             rb.linearVelocity = new Vector3(rb.linearVelocity.x, 0f, rb.linearVelocity.z);
             rb.AddForce(Vector3.up * jumpForce, ForceMode.Impulse);
+            lastJumpTime = Time.time;
             jumpQueued = false;
         }
 
